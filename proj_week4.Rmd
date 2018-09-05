@@ -1,0 +1,171 @@
+---
+
+title: "Untitled"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Practical mechine learning week4 project
+
+### Background
+
+
+Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions:
+* Exactly according to the specification (Class A)
+* Throwing the elbows to the front (Class B) - mistake
+* Lifting the dumbbell only halfway (Class C) - mistake
+* Lowering the dumbbell only halfway (Class D) - mistake
+* Throwing the hips to the front (Class E) - mistake
+
+Accelerometers were located on
+1. belt
+2. forearm
+3. arm
+
+### Task
+reate a report describing:
+*how you built your model
+*how you used cross validation
+*what you think the expected out of sample error is
+*and why you made the choices you did
+
+### QUESTION
+Create a model to predict the manner in which the subjects did the exercise using the accelerometer data as predictors.
+The outcome to be predicted is the "classe" variable.
+
+### Setup
+```{r}
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+library(caret)
+library(randomForest)
+library(e1071)
+library(rattle)
+```
+
+### Download source data
+
+```{r input}
+setwd("C:/Users/Bruker/Desktop/datascience/practical_mech_learning/project")
+url_training <- "C:/Users/Bruker/Desktop/datascience/practical_mech_learning/project/pml-training.csv"
+url_testing <- "C:/Users/Bruker/Desktop/datascience/practical_mech_learning/project/pml-testing.csv"
+training <- read.csv(url_training,na.strings = c("NA","#DIV/0!",""))
+dim(training)
+testing <- read.csv(url_testing,na.strings = c("NA","#DIV/0!",""))
+dim(testing)
+```
+
+### Data Cleaning
+
+```{r cleaning}
+training <- training[,colSums(is.na(training))==0]
+dim(training)
+testing <- testing[,colSums(is.na(testing))==0]
+dim(testing)
+```
+
+### Data Transformation : Convert date and add new variable (Day)
+
+```{r transformation}
+training$cvtd_timestamp <- as.Date(training$cvtd_timestamp,format="%d/%m/%Y %H:%M")
+training$Day <- as.factor(weekdays(training$cvtd_timestamp))
+```
+
+### exploratory data analysis
+
+```{r data analysis}
+table(training$classe)
+prop.table(table(training$classe))
+prop.table(table(training$user_name))
+prop.table(table(training$user_name,training$classe),1)
+prop.table(table(training$user_name,training$classe),2)
+prop.table(table(training$classe,training$Day),1)
+qplot(x=Day,fill=classe,data=training)
+```
+### 1.Class-A activity is the most frequently used activity (28.5%) and is most frequently used by user-Jeremy
+### 2.Adelmo is the most frequent user of across acitivities (20%) but he uses Class "C" activity most frequently.
+### 3.Majority of the actitivies happened during Saturday's and Classes A and B are the most frequently used activites.
+
+## Reduce the number of variables
+
+Remove the non-predictors from the training set. This includes the index, subject name, time and window variables.
+
+```{r cleansing}
+classe<- training$classe
+trainRemove<- grepl("^X|timestamp|window", names(training))
+training<- training[, !trainRemove]
+training<- training[, sapply(training, is.numeric)]
+training$classe<- classe
+testRemove<- grepl("^X|timestamp|window", names(testing))
+testing<- testing[, !testRemove]
+testing<- testing[, sapply(testing, is.numeric)]
+dim(training)
+dim(testing)
+```
+
+## ALGORITHM
+Partition the training data into a training set and a testing/validation set
+
+```{r data partition}
+inTrain <- createDataPartition(training$classe,p=0.6,list = FALSE)
+inTraining <- training[inTrain,]
+inTesting <- training[-inTrain,]
+
+```
+
+## Model Analysis
+
+```{r rpart}
+model1 <- train(classe~.,data = inTraining,method="rpart")
+fancyRpartPlot(model1$finalModel)
+prediction1 <- predict(model1,newdata = inTesting)
+confusionMatrix(prediction1,inTesting$classe)
+```
+
+this model's confusionMatrix proves accuracy is rather low. So, let's try it again with, this time with scaling and cross validation.
+
+```{r scaling}
+model2 <- train(classe~.,data=inTraining,preProcess=c("center", "scale"), trControl = trainControl(method = "cv", number = 4),method="rpart")
+prediction2 <- predict(model2,newdata = inTesting)
+confusionMatrix(prediction2,inTesting$classe)
+```
+
+There was little to no improvement with scaling and cross validation using Decision Trees. For the next model I decided to then use Random Forest, which should provide better accuracy.
+# construct model using random forest
+```{r rf}
+model <- train(classe~.,data=inTraining,method="rf",metric="Accuracy",preProcess=c("center","scale"),trControl=trainControl(method = "cv",number = 4,p=0.60,allowParallel = TRUE))
+print(model,digits=4)
+```
+
+As expected, accuracy is much improved.
+Our out-of-sample error rate is expected to be approximately 1.0 - 0.9833 = 0.0167. So, let's now apply the final model to our testing dataset
+## PREDICT
+Predicting the activity performed using the training file derived test subset
+
+```{r prediction}
+predTest <- predict(model,inTesting)
+```
+
+## EVALUATION
+###Test
+Check the accuracy of the model by comparing the predictions to the actual results
+
+```{r evaluation}
+confusionMatrix(predTest, inTesting$classe)
+```
+
+## Final Model data and important predictors in the model
+
+```{r final model}
+model$finalModel
+```
+
+##Validation/Quiz
+The accuracy of the model by predicting with the Validation/Quiz set supplied in the test file.
+```{r validation}
+print(predict(model, newdata=testing))
+```
